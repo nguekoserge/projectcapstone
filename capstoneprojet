@@ -1,0 +1,82 @@
+#include <Grove-Ultrasonic-Ranger.h>
+#include <Grove_ChainableLED.h>
+
+const int lightSensorPin = A0;
+float distance2 = 50.0;
+float distance1 = 20.0;
+float presenceThreshold = 10.0;
+
+Ultrasonic ultrasonic(D4);
+ChainableLED leds(D2, D3, 1);
+
+unsigned long lastLightReadTime = 0;
+const unsigned long lightReadInterval = 30000;  // Intervalle de lecture du capteur de lumière (30 secondes)
+
+// Seuils pour le capteur de lumière
+const int lightLowerThreshold = 100;  // Seuil inférieur
+const int lightUpperThreshold = 800;  // Seuil supérieur
+
+// ThingSpeak parameters
+const char* thingSpeakAddress = "api.thingspeak.com";
+const char* writeAPIKey = "4DBF046DIAB4MBPN";
+
+void setup() {
+    Serial.begin(9600);
+    leds.init();
+}
+
+void loop() {
+    long RangeInCentimeters;
+    RangeInCentimeters = ultrasonic.MeasureInCentimeters();
+
+    Serial.print("Distance: ");
+    Serial.println(RangeInCentimeters);
+
+    // Logique de changement de couleur de LED
+    if (RangeInCentimeters > distance2) {
+        leds.setColorRGB(0, 0, 255, 0);  // Vert
+    } else if (RangeInCentimeters < distance2 && RangeInCentimeters > distance1) {
+        leds.setColorRGB(0, 255, 165, 0);  // Orange
+    } else if (RangeInCentimeters < distance1) {
+        leds.setColorRGB(0, 255, 0, 0);  // Rouge
+        // Logique de détection de présence
+        Particle.publish("presence_detected", "Personne détectée!");
+
+        // Lire la valeur du capteur de lumière
+        int lightValue = analogRead(lightSensorPin);
+        Serial.print("Light: ");
+        Serial.println(lightValue);
+
+        // Publier la valeur du capteur de lumière et la distance sur ThingSpeak
+        publishToThingSpeak(lightValue, RangeInCentimeters);
+    }
+
+    // Vérifier si le temps écoulé depuis la dernière lecture du capteur de lumière est supérieur à l'intervalle
+    if (millis() - lastLightReadTime >= lightReadInterval) {
+        // Lire la valeur du capteur de lumière
+        int lightValue = analogRead(lightSensorPin);
+        Serial.print("Light: ");
+        Serial.println(lightValue);
+
+        // Publier la valeur du capteur de lumière et la distance sur ThingSpeak
+        publishToThingSpeak(lightValue, RangeInCentimeters);
+
+        // Vérifier les seuils et envoyer un message si la valeur est en dehors des seuils
+        if (lightValue < lightLowerThreshold) {
+            Particle.publish("light_sensor_alert", "La lumière est trop faible!");
+        } else if (lightValue > lightUpperThreshold) {
+            Particle.publish("light_sensor_alert", "La lumière est trop forte!");
+        }
+
+        lastLightReadTime = millis();  // Mettre à jour le temps de la dernière lecture du capteur de lumière
+    }
+
+    delay(20);  // Réduire le délai pour une réponse plus rapide
+}
+
+void publishToThingSpeak(int lightValue, int distanceValue) {
+    char data[256];
+    snprintf(data, sizeof(data), "field1=%d&field2=%d&api_key=%s", distanceValue, lightValue, writeAPIKey);
+
+    Particle.publish("thingspeak", data, PRIVATE);
+}
